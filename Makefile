@@ -120,7 +120,6 @@ TESTS = \
 	merger_test \
 	redis_test \
 	reduce_levels_test \
-	plain_table_db_test \
 	prefix_test \
 	skiplist_test \
 	stringappend_test \
@@ -151,8 +150,9 @@ TOOLS = \
         db_stress \
         ldb \
 	db_repl_stress \
-  options_test \
-	blob_store_bench
+	options_test \
+	blob_store_bench \
+	parse_db_log
 
 PROGRAMS = db_bench signal_test table_reader_bench log_and_apply_bench cache_bench perf_context_test $(TOOLS)
 
@@ -315,6 +315,9 @@ db_repl_stress: tools/db_repl_stress.o $(LIBOBJECTS) $(TESTUTIL)
 
 blob_store_bench: tools/blob_store_bench.o $(LIBOBJECTS) $(TESTUTIL)
 	$(CXX) tools/blob_store_bench.o $(LIBOBJECTS) $(TESTUTIL) $(EXEC_LDFLAGS) -o $@  $(LDFLAGS) $(COVERAGEFLAGS)
+
+parse_db_log: tools/parse_db_log.o $(LIBOBJECTS)
+	$(CXX) tools/parse_db_log.o $(LIBOBJECTS) $(EXEC_LDFLAGS) -o $@  $(LDFLAGS) $(COVERAGEFLAGS)
 
 signal_test: util/signal_test.o $(LIBOBJECTS)
 	$(CXX) util/signal_test.o $(LIBOBJECTS) $(EXEC_LDFLAGS) -o $@ $(LDFLAGS) $(COVERAGEFLAGS)
