@@ -522,6 +522,7 @@ void DBImpl::MaybeDumpStats() {
     Log(db_options_.info_log, "%s", stats.c_str());
 
     PrintStatistics();
+    Log(db_options_.info_log, "------- DUMPING STATS END -------");
   }
 }
 
