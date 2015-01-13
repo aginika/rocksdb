@@ -9,6 +9,7 @@
 #include <sstream> 
 #include <algorithm>
 #include <iterator>
+#include <map>
 
 namespace rocksdb
 {
@@ -16,7 +17,8 @@ namespace rocksdb
     kNoUseEvent,
     kCompactionEvent,
     kFlushEvent,
-    kStatisticsEvent
+    kStatisticsEvent,
+    kOptionsEvent
   };
 
   class EventLog{
@@ -55,8 +57,13 @@ namespace rocksdb
       }else if(log_string.find("Compacted to") != std::string::npos){
 	compaction_type_ = kCompactionFinish;
 	log_string = log_string.substr(log_string.find(":") + 1);
-	char other[256];
-	std::sscanf(log_string.c_str(), " Base version %d files%s", &base_version_id_, other);  
+	int n_file_nums;
+	int np1_file_nums;
+	int output_file_nums;
+	std::sscanf(log_string.c_str(), " Base version %d files[%d %d %d %d %d %d %d], MB/sec: %f rd, %f wr, level %d, files in(%d, %d) out(%d) MB in(%f, %f) out(%f), read-write-amplify(%f) write-amplify(%f) OK, records in: %d, records dropped: 0",
+		    &base_version_id_, &l0_file_num_, &l1_file_num_, &l2_file_num_, &l3_file_num_, &l4_file_num_, &l5_file_num_, &l6_file_num_, &read_mb_per_sec_, &write_mb_per_sec_,
+		    &base_layer_, &n_file_nums, &np1_file_nums, &output_file_nums, &input_file_n_mb_, &input_file_np1_mb_, &output_file_mb_, &read_am_, &write_am_, &records_in_
+		    );
 	return true;
       };
       return false;
@@ -68,14 +75,26 @@ namespace rocksdb
     };
     int base_version_id_;
     int base_layer_;
+    int l0_file_num_;
+    int l1_file_num_;
+    int l2_file_num_;
+    int l3_file_num_;
+    int l4_file_num_;
+    int l5_file_num_;
+    int l6_file_num_;
+    float write_mb_per_sec_;
+    float read_mb_per_sec_;
+    float input_file_n_mb_;
+    float input_file_np1_mb_;
+    float output_file_mb_;
+    float read_am_;
+    float write_am_;
+    int records_in_;
     CompactionType compaction_type_;
     
   private:
-    //int target_base_files_num_;
-    //int target_high_files_num_;
     std::vector<int> target_file_ids_base_;
     std::vector<int> target_file_ids_high_;
-    
   };
 
   class FlushEvent : public EventLog
@@ -121,11 +140,10 @@ namespace rocksdb
 
     bool Parse(std::vector<std::string> log_strings)
     {
-      for(size_t i = 0; i < log_strings.size(); i++){
+      for(size_t i = 0; i < log_strings.size()-1; i++){
 	std::string log_string = log_strings[i];
-	std::cout << log_string << std::endl;
 	//Skip Unneeded Strings
-	if(i < 4)
+	if(i < 5)
 	  continue;
 
 	//For Other Check the first words
@@ -133,11 +151,9 @@ namespace rocksdb
 	if(!tokens.compare(std::string("Flush(GB):"))){
 	  std::sscanf(log_string.c_str(), "Flush(GB): accumulative %f, interval %f",
 		      &flush_infos_.accumulative, &flush_infos_.interval);
-	  std::cout << "flush(gb)" << flush_infos_.accumulative << " : " << flush_infos_.interval << std::endl;
 	}else if(!tokens.compare("Stalls(secs):")){
 	  std::sscanf(log_string.c_str(), "Stalls(secs): %f level0_slowdown, %f level0_numfiles, %f memtable_compaction, %f leveln_slowdown_soft, %f leveln_slowdown_hard",
 		      &stalls_secs_.level0_slowdown,&stalls_secs_.level0_numfiles,&stalls_secs_.memtable_compaction,&stalls_secs_.leveln_slowdown_soft,&stalls_secs_.leveln_slowdown_hard);
-	  std::cout << "stalls(secs)" <<  stalls_secs_.level0_slowdown << " : " <<stalls_secs_.level0_numfiles << " : " <<stalls_secs_.memtable_compaction << " : " <<stalls_secs_.leveln_slowdown_soft << " : " <<stalls_secs_.leveln_slowdown_hard << std::endl;
 	}else if(!tokens.compare("Stalls(count):")){
 	  std::sscanf(log_string.c_str(), "Stalls(secs): %d level0_slowdown, %d level0_numfiles, %d memtable_compaction, %d leveln_slowdown_soft, %d leveln_slowdown_hard",
 		      &stalls_count_.level0_slowdown,&stalls_count_.level0_numfiles,&stalls_count_.memtable_compaction,&stalls_count_.leveln_slowdown_soft,&stalls_count_.leveln_slowdown_hard);
@@ -153,7 +169,7 @@ namespace rocksdb
 	    std::sscanf(log_string.c_str(), "Cumulative WAL: %d writes, %d syncs, %f writes per sync, %f GB written",
 			&cumulative_wal_.writes, &cumulative_wal_.syncs, &cumulative_wal_.writes_per_sync, &cumulative_wal_.gb_written);
 	  }
-	}else if(!tokens.compare("Interval:")){
+	}else if(!tokens.compare("Interval")){
 	  if(log_string.find("writes:") != std::string::npos){
 	    std::sscanf(log_string.c_str(), "Interval writes: %d writes, %d batches, %f writes per batch, %f MB user ingest",
 			&interval_writes_.writes, &interval_writes_.batches, &interval_writes_.writes_per_batch, &interval_writes_.mb_user_ingest);
@@ -290,8 +306,49 @@ namespace rocksdb
     std::vector<compaction_infos> compaction_infos_vector_;
   };
 
-};//namespace rocksdb
+  class OptionsEvent: public EventLog
+  {
+  public:
+    OptionsEvent(){};
+    ~OptionsEvent(){};
 
+    bool Parse(std::vector<std::string> log_strings)
+    {
+      for(size_t i = 0; i < log_strings.size() - 1; i++){
+	std::string log_string = log_strings[i];
+
+	if(i < 3)
+	  continue;
+
+	std::string tokens = log_string.substr(0, log_string.find(" "));
+	
+	struct tm t;
+	char thread_id[128];
+	int now_sec;
+	char prev_term[150], next_term[1024];
+	int ret = std::sscanf(log_string.c_str(),
+			      "%04d/%02d/%02d-%02d:%02d:%02d.%06d %s %s %s",
+			      &t.tm_year,
+			      &t.tm_mon,
+			      &t.tm_mday,
+			      &t.tm_hour,
+			      &t.tm_min,
+			      &t.tm_sec,
+			      &now_sec,
+			      thread_id,
+			      prev_term,
+			      next_term
+			      );
+	if(ret != 0){
+	  options_vector_.push_back(std::string(next_term));
+	}
+      }
+      return true;
+    }
+
+    std::vector<std::string> options_vector_;
+  };
+};//namespace rocksdb
 
 namespace rocksdb
 {
@@ -300,10 +357,13 @@ namespace rocksdb
     std::vector<CompactionEvent*> parsed_compaction_event_logs_;
     std::vector<FlushEvent*> parsed_flush_event_logs_;
     std::vector<StatisticsEvent*> parsed_statistics_event_logs_;
+    std::vector<OptionsEvent*> parsed_options_event_logs_;
     
   public:
     std::vector<CompactionEvent*> getCompactionEvent(){return parsed_compaction_event_logs_;};
     std::vector<FlushEvent*> getFlushEvent(){return parsed_flush_event_logs_;};
+    std::vector<OptionsEvent*> getOptionsEvent(){return parsed_options_event_logs_;};
+    std::vector<StatisticsEvent*> getStatisticsEvent(){return parsed_statistics_event_logs_;};
     LOGParser(){};
     ~LOGParser(){};
 
@@ -344,6 +404,10 @@ namespace rocksdb
 		StatisticsEvent* event_log = new StatisticsEvent();
 		if(event_log->Parse(string_concatenate_buffer))
 		  parsed_statistics_event_logs_.push_back(event_log);
+	      }else if(concatenate_log_type == kOptionsEvent){
+		OptionsEvent* event_log = new OptionsEvent();
+		if(event_log->Parse(string_concatenate_buffer))
+		  parsed_options_event_logs_.push_back(event_log);
 	      }
 	      concatenate_log_type = kNoUseEvent;
 	      string_concatenate_buffer.clear();
@@ -353,14 +417,12 @@ namespace rocksdb
 	    }
 	  }
 
-	  if(ret == EOF)
-	    std::cout << "ERROR" << std::endl;
-	  else if(ret == 0){}
+	  if(ret == 0){}
 	  else{
 	    t.tm_year -= 1900;
 	    t.tm_mon  -= 1;
 	    time_t unix_timestamp = mktime(&t);
-
+	    
 	    std::string thread_string(thread_id);
 	    int cutoff_offset = 28 + thread_string.length();
 	    std::string log_string = line.substr(cutoff_offset).c_str();
@@ -399,6 +461,8 @@ namespace rocksdb
     bool CheckConcatenateEnd(std::string log_string){
       if(log_string.find("DUMPING STATS END") != std::string::npos){
 	return true;
+      }else if(log_string.find("Recovered from") != std::string::npos){
+	return true;
       }
       return false;
     }
@@ -406,6 +470,8 @@ namespace rocksdb
     EventLogType CheckNeedConcatenate(std::string log_string){
       if(log_string.find("DUMPING STATS") != std::string::npos){
 	return kStatisticsEvent;
+      }else if(log_string.find("DB SUMMARY") != std::string::npos){
+	return kOptionsEvent;
       }
       return kNoUseEvent;
     }
@@ -428,15 +494,335 @@ namespace rocksdb
 {
   class VisualizationGenerator{
   public:
-    VisualizationGenerator(std::string filename)
+    VisualizationGenerator(std::string filename, int id)
     {
+      id_ = id;
       log_parser_.Parse(filename);
     };
     ~VisualizationGenerator(){};
 
+    void PrintFileNums()
+    {
+      std::cout << "PrintFileNums " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      std::map<int, std::vector<std::pair<long, int> >* > layer_file_nums;
+      for (int i = 0; i < 7; i++)
+	layer_file_nums[i] = new std::vector<std::pair<long, int>>();
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  for (int j = 0; j < 7; i++)
+	    layer_file_nums[j]->push_back(std::pair<long,int>(compaction_events[i]->GetEventTime(), compaction_events[i]->l0_file_num_));
+	}
+      }
+
+      int layer_id = 0;
+      for (std::map<int, std::vector< std::pair<long, int> >* >::iterator itpairstri = layer_file_nums.begin();
+	   itpairstri != layer_file_nums.end();
+	   itpairstri++) 
+	{
+	  std::vector< std::pair<long, int> > layer_values  = *(itpairstri->second);
+	  variables_js << "var file_nums_"<< std::string("L")+std::to_string(layer_id) << std::string("_") << id_ << " = " << std::endl;
+	  variables_js << "{name:'"<< std::string("L")+std::to_string(layer_id) <<"',"                  << std::endl;
+	  variables_js << "data: [" <<  std::endl;
+	  for (size_t i = 0; i < layer_values.size();i++){
+	    long js_unixtime = layer_values[i].first;
+	    float compaction_wb = layer_values[i].second;
+	    variables_js << "[" << js_unixtime << "," << compaction_wb << "]," << std::endl;
+	  }
+	  variables_js << "]};" << std::endl;
+	  layer_id++;
+	}
+    }
+
+    void PrintLineChartsOfWriteBytes()
+    {
+      std::cout << "PrintLineChartsOfWriteBytes " << std::endl;
+
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->write_mb_per_sec_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("write"), max_layer, compaction_events_with_id);
+    };
+
+    void PrintLineChartsOfValues(std::string keyword, int max_layer, std::map<int, std::vector<std::pair<long, float> >* > datas)
+    {
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::cout << "Compaction_events_with_id("<< keyword <<") :" << std::endl;
+      std::cout << "    size     : "<< datas.size() << std::endl;
+      std::cout << "    max_layer: "<< max_layer << std::endl;
+      
+      for (std::map<int, std::vector< std::pair<long, float> >* >::iterator itpairstri = datas.begin();
+	   itpairstri != datas.end();
+	   itpairstri++) 
+	{
+	  int layer_id = itpairstri->first ;
+	  std::vector< std::pair<long,float> > layer_values  = *(itpairstri->second);
+
+	  variables_js << "var "<< keyword <<"_datas_"<< std::string("L")+std::to_string(layer_id) << std::string("_") << id_ <<" = " << std::endl;
+	  variables_js << "{name:'"<< std::string("L")+std::to_string(layer_id-1) << "->" <<std::string("L")+std::to_string(layer_id) <<"',"                  << std::endl;
+	  variables_js << "data: [" <<  std::endl;
+	  for (size_t i = 0; i < layer_values.size();i++){
+	  	long js_unixtime = layer_values[i].first;
+	  	float compaction_wb = layer_values[i].second;
+	  	variables_js << "[" << js_unixtime << "," << compaction_wb << "]," << std::endl;
+	  }
+	  variables_js << "]};" << std::endl;
+	}
+    }
+
+    void PrintLineChartsOfReadBytes()
+    {
+      std::cout << "PrintLineChartsOfReadBytes " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->read_mb_per_sec_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("read"), max_layer, compaction_events_with_id);
+    };
+
+    void PrintLineChartsOfInputFileNMB()
+    {
+      std::cout << "PrintLineChartsOfInputFileNMB " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->input_file_n_mb_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("input_file_n_mb"), max_layer, compaction_events_with_id);
+    };
+
+     void PrintLineChartsOfInputFileNp1MB()
+    {
+      std::cout << "PrintLineChartsOfInputFileNp1MB " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(
+						 compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->input_file_np1_mb_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("input_file_np1_mb"), max_layer, compaction_events_with_id);
+    };
+
+    void PrintLineChartsOfOutputFileMB()
+    {
+      std::cout << "PrintLineChartsOfOutputFIleMB " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(
+						 compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->output_file_mb_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("output_file_mb"), max_layer, compaction_events_with_id);
+    };
+
+    void PrintLineChartsOfReadAM()
+    {
+      std::cout << "PrintLineChartsOfReadAM " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(
+						 compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->read_am_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("read_am"), max_layer, compaction_events_with_id);
+    };
+
+    void PrintLineChartsOfWriteAM()
+    {
+      std::cout << "PrintLineChartsOfWriteAM " << std::endl;
+
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      std::vector<CompactionEvent* > compaction_events = log_parser_.getCompactionEvent();
+      //divide with layer_id
+      int max_layer = -1;
+      std::map<int, std::vector<std::pair<long, float> >* > compaction_events_with_id;
+      for(size_t i = 0; i < compaction_events.size(); i++){
+	if(compaction_events[i]->compaction_type_ == CompactionEvent::kCompactionFinish){
+	  int target_layer_id = compaction_events[i]->base_layer_;
+	  if (target_layer_id > max_layer){
+	    for (int add_layer_index = max_layer + 1 ; add_layer_index <= target_layer_id ; add_layer_index++){
+	      compaction_events_with_id[add_layer_index] = new std::vector<std::pair<long, float> >();
+	      max_layer = add_layer_index;
+	    }
+	  }
+	  std::pair<long,float> compaction_event(
+						 compaction_events[i]->GetEventTime()*1000+compaction_events[i]->event_usec_/1000,
+						 compaction_events[i]->write_am_);
+	
+	  compaction_events_with_id[target_layer_id]->push_back(compaction_event);
+	}
+      }
+      PrintLineChartsOfValues(std::string("write_am"), max_layer, compaction_events_with_id);
+    };
+
+    void PrintOptionDatas()
+    {
+      OptionsEvent* option_events = (log_parser_.getOptionsEvent())[0];
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      variables_js << "var option_datas"<< std::string("_") << id_ <<" = " << std::endl;
+      variables_js << "["                  << std::endl;
+      std::cout << "OptionData output" << std::endl;
+      for(size_t i = 0; i < option_events->options_vector_.size(); i++){
+	variables_js << "'" << option_events->options_vector_[i] << "',"  << std::endl;
+      }
+      variables_js << "];" << std::endl;
+      std::cout << "OptionData output END" << std::endl;
+    }
+
+    void PrintLatestDatabaseStatus()
+    {
+      std::cout << "LatestDatabaseStatus output" << std::endl;
+      StatisticsEvent* latest_statistics_event = log_parser_.getStatisticsEvent().back();
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      variables_js << "var latest_statistics_total_datas" << std::string("_") << id_ <<" = " << std::endl;
+      variables_js << "["                  << std::endl;
+      variables_js << "'" << latest_statistics_event->uptime_secs_.total << "',"  << std::endl;
+      variables_js << "'" << latest_statistics_event->cumulative_writes_.writes << "',"  << std::endl;
+      variables_js << "'" << latest_statistics_event->cumulative_writes_.batches << "',"  << std::endl;
+      variables_js << "'" << latest_statistics_event->cumulative_writes_.gb_user_ingest << "',"  << std::endl;
+      variables_js << "'" << latest_statistics_event->flush_infos_.accumulative << "',"  << std::endl;
+      variables_js << "];" << std::endl;
+
+      variables_js << "var latest_statistics_compaction_datas" << std::string("_") << id_ <<" = " << std::endl;
+      variables_js << "["                  << std::endl;
+      std::vector<StatisticsEvent::compaction_infos> compaction_info_vector = latest_statistics_event->compaction_infos_vector_;
+      for(size_t i = 0; i < compaction_info_vector.size();i++)
+	{
+	  variables_js << "{" << compaction_info_vector[i].name << ":" << std::endl;
+	  variables_js << "["<< std::endl;
+	  variables_js << "'" << compaction_info_vector[i].files << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].size_mb << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Read_gb << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Rn_gb << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Rnp1_gb << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Write_gb << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Wnew_gb << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].RW_Amp << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].W_Amp << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Rd_mb_per_s << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Wr_mb_per_s << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Rn_cnt << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Rnp1_cnt << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Wnp1_cnt << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Wnew_cnt << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Comp_sec << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Comp_cnt << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Avg_sec << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Stall_sec << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Stall_cnt << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].Avg_ms << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].RecordIn << "',"  << std::endl;
+	  variables_js << "'" << compaction_info_vector[i].RecordDrop << "',"  << std::endl;
+	  variables_js << "]},"<< std::endl;
+	}
+
+      variables_js << "];" << std::endl;      
+
+      std::cout << "LatestDatabaseStatus output END" << std::endl;
+    }
+
     void PrintEventDatas()
     {
-      std::cout << "Print " << std::endl;
+      std::cout << "PrintEventDatas " << std::endl;
 
       std::vector<std::string> colors;
       colors.push_back(std::string("#0066FF"));
@@ -446,8 +832,8 @@ namespace rocksdb
       colors.push_back(std::string("#66FFFF"));
       colors.push_back(std::string("#FFFF66"));
 
-      std::ofstream variables_js("variables.js");
-      variables_js << "var event_datas = " << std::endl;
+      std::ofstream variables_js("variables.js", std::ios_base::app | std::ios_base::out);
+      variables_js << "var event_datas" << std::string("_") << id_ <<" = " << std::endl;
       variables_js << "["                  << std::endl;
       std::cout << "Fisrt output" << std::endl;
 
@@ -527,15 +913,28 @@ namespace rocksdb
 
   private:
     rocksdb::LOGParser log_parser_;
+    int id_;
   };
-}
+}//namespace rocksdb
 
 int main(int argc, char** argv) {
   if (argc < 2){
     std::cout << "Please pass the file path" << std::endl;
     return -1;
   }
-
-  rocksdb::VisualizationGenerator vis_gen(argv[1]);
-  vis_gen.PrintEventDatas();
+  std::vector<std::string> names;
+  for(int i = 0; i < argc - 1; i++){
+    rocksdb::VisualizationGenerator vis_gen(argv[i + 1], i);
+    vis_gen.PrintFileNums();
+    vis_gen.PrintLineChartsOfWriteBytes();
+    vis_gen.PrintLineChartsOfReadBytes();
+    vis_gen.PrintLineChartsOfInputFileNMB();
+    vis_gen.PrintLineChartsOfInputFileNp1MB();
+    vis_gen.PrintLineChartsOfOutputFileMB();
+    vis_gen.PrintLineChartsOfReadAM();
+    vis_gen.PrintLineChartsOfWriteAM();
+    vis_gen.PrintOptionDatas();
+    vis_gen.PrintLatestDatabaseStatus();
+    vis_gen.PrintEventDatas();
+  }
 }
