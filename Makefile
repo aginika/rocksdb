@@ -152,7 +152,7 @@ TOOLS = \
 	db_repl_stress \
 	options_test \
 	blob_store_bench \
-	parse_db_log
+	db_visualization
 
 PROGRAMS = db_bench signal_test table_reader_bench log_and_apply_bench cache_bench perf_context_test $(TOOLS)
 
@@ -316,8 +316,8 @@ db_repl_stress: tools/db_repl_stress.o $(LIBOBJECTS) $(TESTUTIL)
 blob_store_bench: tools/blob_store_bench.o $(LIBOBJECTS) $(TESTUTIL)
 	$(CXX) tools/blob_store_bench.o $(LIBOBJECTS) $(TESTUTIL) $(EXEC_LDFLAGS) -o $@  $(LDFLAGS) $(COVERAGEFLAGS)
 
-parse_db_log: tools/parse_db_log.o $(LIBOBJECTS)
-	$(CXX) tools/parse_db_log.o $(LIBOBJECTS) $(EXEC_LDFLAGS) -o $@  $(LDFLAGS) $(COVERAGEFLAGS)
+db_visualization: tools/db_visualization.o $(LIBOBJECTS)
+	$(CXX) tools/db_visualization.o $(LIBOBJECTS) $(EXEC_LDFLAGS) -o $@  $(LDFLAGS) $(COVERAGEFLAGS)
 
 signal_test: util/signal_test.o $(LIBOBJECTS)
 	$(CXX) util/signal_test.o $(LIBOBJECTS) $(EXEC_LDFLAGS) -o $@ $(LDFLAGS) $(COVERAGEFLAGS)
