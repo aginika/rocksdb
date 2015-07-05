@@ -1,0 +1,26 @@
+add DB LOG file parser
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Author:    Yuto Inagaki <frandle@aginika.local>
+# Date:      Fri Jan 16 04:48:05 2015 +0900
+# Committer: Yuto Inagaki <frandle@aginika.local>
+#
+# On branch add-log-parser
+# Changes to be committed:
+#	modified:   db/compaction_job.cc
+#	modified:   db/db_impl.cc
+#	modified:   util/options.cc
+#	new file:   utilities/parse_db_log/parse_db_log.cc
+#	new file:   utilities/parse_db_log/parse_db_log.h
+#
+# Changes not staged for commit:
+#	modified:   Makefile
+#
+# Untracked files:
+#	db_visualization
+#	tools/db_visualization.cc
+#	tools/parse_db_log.cc
+#	variables.js
+#
